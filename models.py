@@ -25,7 +25,7 @@ class Student(Base):
     pin = Column(Text, nullable=False)  # Store hashed pin here
     photo = Column(String(255))  # URL of the image
     photo_public_id = Column(String(255))  # Cloudinary public_id
-    device_id = Column(String)  # <-- add this if you want to store device ID
+    device_id = Column(String, unique=True, nullable=True)
 
     # Correct relationship property name
     attendances = relationship("Attendance", back_populates="student")

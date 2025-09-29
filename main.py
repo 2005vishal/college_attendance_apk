@@ -465,26 +465,41 @@ def apk_login(data: StudentLogin, db: Session = Depends(get_db)):
     pin = data.pin.strip()
     device_id = data.device_id.strip() if data.device_id else None
 
+    # 1️⃣ Student existence check
     student = db.query(Student).filter(Student.roll == roll).first()
     if not student:
         raise HTTPException(status_code=401, detail="Invalid roll or PIN")
 
+    # 2️⃣ PIN verification
     if not verify_password(pin, student.pin):
         raise HTTPException(status_code=401, detail="Invalid roll or PIN")
 
-    # Device ID handling
+    # 3️⃣ Device ID handling
     if student.device_id is None:
-        # First-time login: register device
+        # First-time login: device binding
         if not device_id:
             raise HTTPException(status_code=400, detail="Device ID required for first login")
+
+        # Check if this device is already registered to another student
+        existing = db.query(Student).filter(Student.device_id == device_id).first()
+        if existing:
+            raise HTTPException(
+                status_code=403,
+                detail=f"This device is already registered to roll {existing.roll}. Contact admin."
+            )
+
+        # Register device to this student
         student.device_id = device_id
         db.commit()
+
     elif device_id != student.device_id:
         # Device mismatch
-        raise HTTPException(status_code=403, detail="This device is not registered. Contact admin.")
+        raise HTTPException(status_code=403, detail="This device is not registered for this account. Contact admin.")
 
+    # 4️⃣ Generate token
     token = create_access_token({"sub": student.roll})
     return {"token": token, "token_type": "bearer"}
+
 
 @router.get("/profile", response_model=StudentProfileOut)
 def apk_profile(roll: str = Depends(get_current_student), db: Session = Depends(get_db)):
