@@ -12,7 +12,7 @@ from models import Student, Attendance, Admin
 from schemas import StudentCreate, StudentResponse, AttendanceOut, AdminLogin, MarkAttendance
 from dotenv import load_dotenv
 from auth import create_access_token, decode_access_token, verify_password, get_password_hash
-from schemas import StudentLogin, StudentProfileOut, AttendanceRecord, ForgotPinRequest
+from schemas import StudentLogin, StudentProfileOut, AttendanceRecord, ForgotPinRequest,ResetDeviceRequest
 from fastapi import APIRouter, Body
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.responses import RedirectResponse
@@ -125,7 +125,27 @@ async def create_student(
     db.commit()
     db.refresh(new_student)
     return new_student
+# -------------------------------rest Device---------------------------
+@app.post("/admin/reset-device")
+def admin_reset_device(
+    data: ResetDeviceRequest,
+    db: Session = Depends(get_db),
+):
+    # Verify API key
+    verify_api_key(MARK_ABSENT_API_KEY)
 
+    # Find student
+    roll = data.roll.strip().upper()
+    student = db.query(Student).filter(Student.roll == roll).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    # Reset device_id
+    student.device_id = None
+    db.commit()
+    return {"message": f"Device reset successfully for student {roll}"}
+
+# ---------------- studen list--------------------------------------
 
 @app.get("/students", response_model=list[StudentResponse])
 def list_students(
@@ -435,11 +455,15 @@ def get_current_student(credentials: HTTPAuthorizationCredentials = Depends(secu
 @router.post("/login")
 def apk_login(data: StudentLogin, db: Session = Depends(get_db)):
     """
-    Student login with JSON body { "roll": "...", "pin": "...." }
+    Student login with JSON body { "roll": "...", "pin": "....", "device_id": "..." }
+    Handles:
+        - First-time device registration
+        - Device check for subsequent logins
     Returns: { "token": "<jwt>", "token_type": "bearer" }
     """
     roll = data.roll.strip().upper()
     pin = data.pin.strip()
+    device_id = data.device_id.strip() if data.device_id else None
 
     student = db.query(Student).filter(Student.roll == roll).first()
     if not student:
@@ -447,6 +471,17 @@ def apk_login(data: StudentLogin, db: Session = Depends(get_db)):
 
     if not verify_password(pin, student.pin):
         raise HTTPException(status_code=401, detail="Invalid roll or PIN")
+
+    # Device ID handling
+    if student.device_id is None:
+        # First-time login: register device
+        if not device_id:
+            raise HTTPException(status_code=400, detail="Device ID required for first login")
+        student.device_id = device_id
+        db.commit()
+    elif device_id != student.device_id:
+        # Device mismatch
+        raise HTTPException(status_code=403, detail="This device is not registered. Contact admin.")
 
     token = create_access_token({"sub": student.roll})
     return {"token": token, "token_type": "bearer"}
